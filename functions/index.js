@@ -1,26 +1,58 @@
 "use strict";
 
 const functions = require("firebase-functions");
-
 const admin = require("firebase-admin");
+const {HttpsError} = require("firebase-functions/v1/https");
 admin.initializeApp();
 
-exports.createWallet = functions.auth.user().onCreate(async (user) => {
-  const walletDoc = {
-    "current_balance": 0,
-    "last_updated": new Date(),
-    "owner_id": user.uid,
-  };
-  // Push the new message into Firestore using the Firebase Admin SDK.
-  const walletDocRef = await admin.firestore().collection("wallets")
-      .add(walletDoc);
+const walletsCollection = admin.firestore().collection("wallets");
+const usersCollection = admin.firestore().collection("users");
 
-  const userDoc = {
-    "current_wallet_id": walletDocRef.id,
-  };
+// exports.createWallet = functions.auth.user().onCreate(async (user) => {
+//   const walletDoc = {
+//     "current_balance": 0,
+//     "last_updated": new Date(),
+//     "owner_id": user.uid,
+//   };
+//   // Push the new message into Firestore using the Firebase Admin SDK.
+//   const walletDocRef = await admin.firestore().collection("wallets")
+//       .add(walletDoc);
 
-  return admin.firestore().collection("users").doc(user.uid).set(userDoc);
-});
+//   const userDoc = {
+//     "current_wallet_id": walletDocRef.id,
+//   };
+
+//   return admin.firestore().collection("users").doc(user.uid).set(userDoc);
+// });
+
+exports.createWallet = functions.region("southamerica-east1").
+    https.onCall((data, context) => {
+      const userId = context.auth.uid;
+      const walletDoc = {
+        "current_balance": 0,
+        "last_updated": new Date(),
+        "owner_id": userId,
+      };
+
+      const walletDocRef = walletsCollection.doc();
+
+      const userDoc = {
+        "current_wallet_id": walletDocRef.id,
+      };
+
+      const batch = admin.firestore().batch();
+      batch.set(walletDocRef, walletDoc);
+      batch.set(usersCollection.doc(userId), userDoc);
+
+      batch.commit()
+          .then((writeResult) => {
+            return {writeResult: writeResult};
+          })
+          .catch(() => {
+            throw new HttpsError("write-wallet-error",
+                "Error while writing to the database");
+          });
+    });
 
 exports.addMessage = functions.https.onRequest(async (req, res) => {
   // Grab the text parameter.
