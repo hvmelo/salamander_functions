@@ -5,17 +5,21 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
-exports.createWallet = functions.auth.user().onCreate((user) => {
+exports.createWallet = functions.auth.user().onCreate(async (user) => {
   const walletDoc = {
     "current_balance": 0,
     "last_updated": new Date(),
-    "owner": {
-      email: user.email,
-      uid: user.uid,
-    },
+    "owner_id": user.uid,
   };
   // Push the new message into Firestore using the Firebase Admin SDK.
-  return admin.firestore().collection("wallets").add(walletDoc);
+  const walletDocRef = await admin.firestore().collection("wallets")
+      .add(walletDoc);
+
+  const userDoc = {
+    "current_wallet_id": walletDocRef.id,
+  };
+
+  return admin.firestore().collection("users").doc(user.uid).set(userDoc);
 });
 
 exports.addMessage = functions.https.onRequest(async (req, res) => {
