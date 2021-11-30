@@ -44,11 +44,13 @@ exports.createWallet = functions.region("southamerica-east1").
       batch.set(walletDocRef, walletDoc);
       batch.set(usersCollection.doc(userId), userDoc);
 
-      batch.commit()
+      return batch.commit()
           .then((writeResult) => {
-            return {writeResult: writeResult};
+            console.log(writeResult);
+            return {wallet_id: walletDocRef.id};
           })
-          .catch(() => {
+          .catch((err) => {
+            console.log(err);
             throw new HttpsError("write-wallet-error",
                 "Error while writing to the database");
           });
