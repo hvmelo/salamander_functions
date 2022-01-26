@@ -1,32 +1,41 @@
 "use strict";
 
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
-const {HttpsError} = require("firebase-functions/v1/https");
-admin.initializeApp();
+import * as functions from "firebase-functions";
+import admin from "firebase-admin";
+import {HttpsError} from "firebase-functions/v1/https";
+import LndGrpc from "lnd-grpc";
+import {SecretManagerServiceClient} from "@google-cloud/secret-manager";
 
+// Initialize Firestore
+admin.initializeApp();
 const walletsCollection = admin.firestore().collection("wallets");
 const usersCollection = admin.firestore().collection("users");
 
-// exports.createWallet = functions.auth.user().onCreate(async (user) => {
-//   const walletDoc = {
-//     "current_balance": 0,
-//     "last_updated": new Date(),
-//     "owner_id": user.uid,
-//   };
-//   // Push the new message into Firestore using the Firebase Admin SDK.
-//   const walletDocRef = await admin.firestore().collection("wallets")
-//       .add(walletDoc);
+// Initialize the Secret Manager
+const project = "projects/salamander-cloud";
+const MACAROON_RESOURCE_NAME =
+  `${project}/secrets/lnd-server-admin-macaroon/versions/latest`;
+const PASSWORD_RESOURCE_NAME =
+  `${project}/secrets/lnd-server-wallet-password/versions/latest`;
+const TLS_CERT_RESOURCE_NAME =
+  `${project}/secrets/lnd-server-tls-cert/versions/latest`;
 
-//   const userDoc = {
-//     "current_wallet_id": walletDocRef.id,
-//   };
 
-//   return admin.firestore().collection("users").doc(user.uid).set(userDoc);
-// });
+// Initialize LND client
+const LND_HOST = "salamanderlnd.ddns.net";
+const LND_PORT = 10009;
 
-exports.createWallet = functions.region("southamerica-east1").
+// Declare the grpc (will be lazy initialized)
+let grpc;
+let walletPassword;
+
+export const createWallet = functions.
     https.onCall((data, context) => {
+    // verify Firebase Auth ID token
+      if (!context.auth) {
+        return {message: "Authentication Required!", code: 401};
+      }
+
       const userId = context.auth.uid;
       const walletDoc = {
         "current_balance": 0,
@@ -56,29 +65,119 @@ exports.createWallet = functions.region("southamerica-east1").
           });
     });
 
-exports.addMessage = functions.https.onRequest(async (req, res) => {
-  // Grab the text parameter.
-  const original = req.query.text;
-  // Push the new message into Firestore using the Firebase Admin SDK.
-  const writeResult = await admin.firestore().collection("messages")
-      .add({original: original});
-  // Send back a message that we've successfully written the message
-  res.json({result: `Message with ID: ${writeResult.id} added.`});
-});
+// Saves a message to the Firebase Realtime Database but sanitizes the
+// text by removing swearwords.
+export const addMessage = functions.https.
+    onCall((data, context) => {
+    // Message text passed from the client.
+      const text = data.text;
 
-exports.makeUppercase = functions.firestore.document("/messages/{documentId}")
-    .onCreate((snap, context) => {
-      const original = snap.data().original;
+      // Checking attribute.
+      if (!(typeof text === "string") || text.length === 0) {
+      // Throwing an HttpsError so that the client gets the error details.
+        throw new HttpsError("invalid-argument",
+            "The function must be called with one arguments \"text\" " +
+        "containing the message text to add.");
+      }
+      // Checking that the user is authenticated.
+      if (!context.auth) {
+      // Throwing an HttpsError so that the client gets the error details.
+        throw new HttpsError("failed-precondition",
+            "The function must be called while authenticated.");
+      }
 
-      // Access the parameter `{documentId}` with `context.params`
-      functions.logger.log("Uppercasing", context.params.documentId, original);
+      // Authentication / user information is automatically added to the
+      // request.
+      const uid = context.auth.uid;
+      const name = context.auth.token.name || null;
+      const picture = context.auth.token.picture || null;
+      const email = context.auth.token.email || null;
 
-      const uppercase = original.toUpperCase();
-
-      // You must return a Promise when performing asynchronous tasks inside
-      // a Functions such as writing to Firestore.
-      // Setting an 'uppercase' field in Firestore document returns a Promise.
-      return snap.ref.set({uppercase}, {merge: true});
+      // Saving the new message to Firestore.
+      return admin.firestore().collection("messages").add({
+        text: text.toUpperCase(),
+        author: {uid, name, picture, email},
+      }).then(() => {
+        console.log("New Message written");
+        // Returning the sanitized message to the client.
+        return {text: text.toUpperCase()};
+      })
+          .catch((error) => {
+            // Re-throwing the error as an HttpsError so that the client
+            // gets the error details.
+            throw new HttpsError("unknown", error.message, error);
+          });
     });
 
 
+export const walletBalance = functions.
+    https.onCall(async (data, context) => {
+    // verify Firebase Auth ID token
+      if (!context.auth) {
+        return {message: "Authentication Required!", code: 401};
+      }
+
+      if (grpc == null) {
+        grpc = await connectToServer();
+      }
+
+      if (grpc.state != "active") {
+        await grpc.connect();
+        if (grpc.state == "ready") {
+          throw new HttpsError("server-offline", "Can't connect to LND server");
+        }
+      }
+
+      if (grpc.state === "locked") {
+        const {WalletUnlocker} = grpc.services;
+        if (walletPassword == null) {
+          walletPassword = await getSecret(PASSWORD_RESOURCE_NAME);
+        }
+        await WalletUnlocker.unlockWallet({
+          wallet_password: walletPassword,
+        });
+        if (grpc.state != "locked") {
+          await grpc.activateLightning();
+        } else {
+          throw new HttpsError("wrong-password", "Can't connect to LND server");
+        }
+      }
+
+      if (grpc.state == "active") {
+        const {Lightning} = grpc.services;
+        const balance = await Lightning.walletBalance();
+        console.log(balance);
+        return {wallet_balance: balance};
+      } else {
+        throw new HttpsError("wallet-balance-error",
+            "Error while trying to connect to the LND server");
+      }
+    });
+
+/**
+ * Retrieves a secret.
+ * @param {resourceName} resourceName The resource name
+ * @return {secret} The secret.
+ */
+async function getSecret(resourceName) {
+  // Access the secret.
+  const secretClient = new SecretManagerServiceClient();
+  const [version] =
+    await secretClient.accessSecretVersion({name: resourceName});
+  return version.payload.data;
+}
+
+/**
+ * Connects to the LND server.
+ * @return {grpc} The grpc connection object.
+ */
+async function connectToServer() {
+  const macaroon = await getSecret(MACAROON_RESOURCE_NAME);
+  const cert = await getSecret(TLS_CERT_RESOURCE_NAME);
+
+  return new LndGrpc({
+    host: `${LND_HOST}:${LND_PORT}`,
+    cert: cert.toString(),
+    macaroon: macaroon.toString("hex"),
+  });
+}
