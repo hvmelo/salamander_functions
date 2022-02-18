@@ -10,7 +10,14 @@ const configCollection = db.collection("config");
 
 export const syncTransactions = functions.
     https.onCall(async (data, context) => {
-      const addresses = getAddresses();
+      const addresses = await getAddresses();
+
+      if (addresses.length == 0) {
+        console.log("The addresses collection is empty. Aborting.");
+      } else {
+        console.log(`The number of relevant addresses is ${addresses.length}`);
+      }
+
 
       // Connect to the lnd server and activate lightining (if needed)
       await lnd.activateLightning();
@@ -20,6 +27,10 @@ export const syncTransactions = functions.
 
         // Retrieve the last block synced from firestore
         const blockHeight = await currentBlockHeight();
+
+        console.log(
+            `Getting transactions starting from block height: ${blockHeight}.`,
+        );
 
         // Retrieve transactions starting from block_height
         const result = await Lightning.
@@ -31,7 +42,7 @@ export const syncTransactions = functions.
             reduce((relevantList, tx) => {
               if (tx.amount > 0) {
                 const address = tx.dest_addresses.
-                    find((element) => addresses[element]);
+                    find((element) => addresses.includes(element));
                 if (address) {
                   tx.address = address;
                   relevantList.push(tx);
@@ -39,6 +50,10 @@ export const syncTransactions = functions.
               }
               return relevantList;
             }, []);
+
+        console.log(
+            `The number of relevant transactions is ${relevantTxs.length}.`,
+        );
 
         // Sets the batch size (system max is 500)
         const batchSize = 300;
@@ -71,10 +86,17 @@ export const syncTransactions = functions.
         } else {
           /* As there are no transactions to sync, will just update
              last sync timestamp */
+          console.log("As there are no transactions to sync, " +
+                      "will just update last sync timestamp.");
           const lndSyncDoc = {"block_height": updatedBlockHeight,
             "timestamp": FieldValue.serverTimestamp()};
           await configCollection.doc("lnd_sync").set(lndSyncDoc);
         }
+
+        console.log("Finished with " +
+                `${confirmedTx.length} confirmed, ` +
+                `${unconfirmedTx.length} unconfirmed, ` +
+                `${updatedBlockHeight} block height.`);
 
         return {confirmedTx, unconfirmedTx, updatedBlockHeight};
       } else {
@@ -89,10 +111,7 @@ export const syncTransactions = functions.
  */
 async function getAddresses() {
   const addressesSnap = await addressesCollection.get();
-  const addressList = addressesSnap.docs.reduce((accum, doc) => {
-    accum[doc.id] = doc.data();
-    return accum;
-  }, {});
+  const addressList = addressesSnap.docs.map((doc) => doc.id);
   return addressList;
 }
 
@@ -118,6 +137,8 @@ async function currentBlockHeight() {
  *               to the database
  */
 async function runBatch(transactions, start, end, firstUnconfirmedBlock) {
+  console.log("First block with unconfirmed transactions: " +
+     `${firstUnconfirmedBlock ? "None" : firstUnconfirmedBlock}`);
   let lastConfirmedBlock = -1;
 
   const batch = db.batch();
@@ -155,9 +176,13 @@ async function runBatch(transactions, start, end, firstUnconfirmedBlock) {
       unconfirmedTx.push(tx);
       firstUnconfirmedBlock = firstUnconfirmedBlock > 0 ?
           firstUnconfirmedBlock : transaction.block_height;
+      console.log(`Set UNCONFIRMED tx: ${transaction.tx_hash} ` +
+                  `for address ${transaction.address}`);
     } else {
       confirmedTx.push(tx);
       lastConfirmedBlock = transaction.block_height;
+      console.log(`Set CONFIRMED tx: ${transaction.tx_hash} ` +
+                  `for address ${transaction.address}`);
     }
   }
 

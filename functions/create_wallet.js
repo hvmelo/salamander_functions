@@ -63,6 +63,8 @@ export const createWallet = functions.
       // Creates the address document
       const addressDoc = {
         "wallet_id": walletDocRef.id,
+        "confirmed_balance": 0,
+        "pending_balance": 0,
       };
 
       // Creates the user document
