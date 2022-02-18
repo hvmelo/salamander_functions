@@ -1,8 +1,8 @@
-import "./firebase_setup.js";
+import "./init/firebase_init.js";
 
-export {createWallet} from "./create_wallet.js";
-export {syncTransactions} from "./sync_transactions.js";
-export {updateAddressBalance} from "./update_address_balance.js";
-export {walletBalance} from "./wallet_balance.js";
-export {getTransactions} from "./get_transactions.js";
+export {createWallet} from "./functions/create_wallet.js";
+export {syncTransactions} from "./functions/sync_transactions.js";
+export {updateAddressBalance} from "./functions/update_address_balance.js";
+export {walletBalance} from "./functions/wallet_balance.js";
+export {getTransactions} from "./functions/get_transactions.js";
 

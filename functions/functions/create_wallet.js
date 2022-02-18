@@ -1,7 +1,7 @@
 import admin from "firebase-admin";
 import * as functions from "firebase-functions";
 import {HttpsError} from "firebase-functions/v1/https";
-import * as lnd from "./lnd.js";
+import * as lnd from "../init/lnd_init.js";
 
 const db = admin.firestore();
 const walletsCollection = db.collection("wallets");
