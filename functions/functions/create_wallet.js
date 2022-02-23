@@ -52,7 +52,8 @@ export const createWallet = functions.
       // Creates the wallet document
       const walletDoc = {
         "current_address": address,
-        "current_balance": 0,
+        "confirmed_balance": 0,
+        "pending_balance": 0,
         "last_updated": new Date(),
         "owner_id": userId,
         "addresses": [address],
