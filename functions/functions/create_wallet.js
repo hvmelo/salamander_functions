@@ -19,7 +19,6 @@ export const createWallet = functions.
       const email = context.auth.token.email || null;
       const name = context.auth.token.name || null;
 
-
       // Checks if the user is already in the database
       const userRef = usersCollection.doc(userId);
       const userCheck = await userRef.get();
@@ -40,6 +39,8 @@ export const createWallet = functions.
         const result = await Lightning.newAddress({type: NESTED_PUBKEY_HASH});
         if (result != null) {
           address = result.address;
+          console.log(`Created a new address for user ${userId} ` +
+                    `with hash ${address}.`);
         } else {
           throw new HttpsError("aborted",
               "Error when trying to to retrieve a new address.");
@@ -49,31 +50,43 @@ export const createWallet = functions.
             "Error when trying to to retrieve a new address.");
       }
 
+      const dateNow = new Date();
+
       // Creates the wallet document
       const walletDoc = {
-        "current_address": address,
-        "confirmed_balance": 0,
-        "pending_balance": 0,
-        "last_updated": new Date(),
-        "owner_id": userId,
-        "addresses": [address],
+        balance: {
+          total: 0,
+          incoming: {
+            confirmed: 0,
+            unconfirmed: 0,
+          },
+          outgoing: {
+            confirmed: 0,
+            unconfirmed: 0,
+          },
+        },
+        active_address: address,
+        created: dateNow,
+        last_updated: dateNow,
+        owner_id: userId,
+        associated_addresses: [address],
       };
 
       const walletDocRef = walletsCollection.doc();
 
       // Creates the address document
       const addressDoc = {
-        "wallet_id": walletDocRef.id,
-        "confirmed_balance": 0,
-        "pending_balance": 0,
+        wallet_id: walletDocRef.id,
+        address_balance_confirmed: 0,
+        address_balance_unconfirmed: 0,
       };
 
       // Creates the user document
       const userDoc = {
-        "email": email,
-        "name": name,
-        "current_wallet_id": walletDocRef.id,
-        "associated_wallet_ids": [walletDocRef.id],
+        email: email,
+        name: name,
+        active_wallet_id: walletDocRef.id,
+        associated_wallet_ids: [walletDocRef.id],
       };
 
       // Creates the batch (commit everything together or rollback otherwise)
@@ -81,6 +94,10 @@ export const createWallet = functions.
       batch.set(walletDocRef, walletDoc);
       batch.set(usersCollection.doc(userId), userDoc);
       batch.set(addressesCollection.doc(address), addressDoc);
+
+      console.log("Successfully created a new wallet with id " +
+                `${walletDocRef.id} for user ${userId}`);
+
 
       try {
         await batch.commit();

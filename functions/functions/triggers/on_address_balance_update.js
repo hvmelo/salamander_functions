@@ -6,17 +6,16 @@ const db = admin.firestore();
 const addressesCollection = db.collection("addresses");
 const walletsCollection = db.collection("wallets");
 
-export const updateWalletBalance = functions.firestore
+export const onAddressBalanceUpdate = functions.firestore
     .document("addresses/{address}")
     .onWrite(async (change, context) => {
       const walletId = change.after.data()["wallet_id"];
-      console.log(`The wallet is ${walletId}`);
 
       await db.runTransaction(async (t) => {
         const walletRef = walletsCollection.doc(walletId);
         const walletSnap = await walletRef.get();
         if (!walletSnap.exists) {
-          console.log(`No wallets found with id ${walletId}`);
+          console.log(`No wallets found with id '${walletId}'`);
           return;
         }
 
@@ -24,26 +23,28 @@ export const updateWalletBalance = functions.firestore
             where("wallet_id", "==", walletId).get();
 
         if (addressesSnap.empty) {
-          console.log(`No matching addresses for wallet id ${walletId}`);
+          console.log(`No matching addresses for wallet id '${walletId}'`);
           return;
         }
 
-        console.log(addressesSnap.docs);
-
-        const walletBalance = addressesSnap.docs.reduce((accum, doc) => {
-          console.log(doc.data());
-          accum["confirmed_balance"] += doc.data()["confirmed_balance"];
-          accum["pending_balance"] += doc.data()["pending_balance"];
+        const incomingBalance = addressesSnap.docs.reduce((accum, doc) => {
+          accum["confirmed_balance"] += doc.data()["address_balance"];
+          accum["unconfirmed_balance"] +=
+                doc.data()["address_balance_unconfirmed"];
           return accum;
-        }, {"confirmed_balance": 0, "pending_balance": 0});
+        }, {"confirmed_balance": 0, "unconfirmed_balance": 0});
 
-        console.log(walletBalance);
-
-        t.update(walletRef,
+        t.set(walletRef,
             {
-              confirmed_balance: walletBalance["confirmed_balance"],
-              pending_balance: walletBalance["pending_balance"],
+              balance: {
+                incoming: {
+                  confirmed: incomingBalance["confirmed_balance"],
+                  unconfirmed: incomingBalance["unconfirmed_balance"],
+                },
+              },
               last_updated: FieldValue.serverTimestamp(),
-            });
+            }, {merge: true});
       });
     });
+
+
