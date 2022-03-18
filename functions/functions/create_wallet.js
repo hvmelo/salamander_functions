@@ -55,7 +55,7 @@ export const createWallet = functions.
       // Creates the wallet document
       const walletDoc = {
         balance: {
-          total: 0,
+          total_confirmed: 0,
           incoming: {
             confirmed: 0,
             unconfirmed: 0,
@@ -77,8 +77,8 @@ export const createWallet = functions.
       // Creates the address document
       const addressDoc = {
         wallet_id: walletDocRef.id,
-        address_balance_confirmed: 0,
-        address_balance_unconfirmed: 0,
+        confirmed_balance: 0,
+        unconfirmed_balance: 0,
       };
 
       // Creates the user document

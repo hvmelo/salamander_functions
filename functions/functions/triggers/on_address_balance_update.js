@@ -11,6 +11,9 @@ export const onAddressBalanceUpdate = functions.firestore
     .onWrite(async (change, context) => {
       const walletId = change.after.data()["wallet_id"];
 
+      console.log("Detected an address balance update for wallet " +
+        `'${walletId}'. Updating wallet balances...`);
+
       await db.runTransaction(async (t) => {
         const walletRef = walletsCollection.doc(walletId);
         const walletSnap = await walletRef.get();
@@ -28,15 +31,20 @@ export const onAddressBalanceUpdate = functions.firestore
         }
 
         const incomingBalance = addressesSnap.docs.reduce((accum, doc) => {
-          accum["confirmed_balance"] += doc.data()["address_balance"];
+          accum["confirmed_balance"] += doc.data()["confirmed_balance"];
           accum["unconfirmed_balance"] +=
-                doc.data()["address_balance_unconfirmed"];
+          doc.data()["unconfirmed_balance"];
           return accum;
         }, {"confirmed_balance": 0, "unconfirmed_balance": 0});
+
+        const walletData = walletSnap.data();
+        const totalConfirmed = (walletData.balance?.outgoing?.confirmed ?? 0) +
+        incomingBalance["confirmed_balance"];
 
         t.set(walletRef,
             {
               balance: {
+                total_confirmed: totalConfirmed,
                 incoming: {
                   confirmed: incomingBalance["confirmed_balance"],
                   unconfirmed: incomingBalance["unconfirmed_balance"],
@@ -44,6 +52,12 @@ export const onAddressBalanceUpdate = functions.firestore
               },
               last_updated: FieldValue.serverTimestamp(),
             }, {merge: true});
+
+        console.log(`Updated incoming balance for wallet '${walletId}'. ` +
+        `Confirmed: ${incomingBalance["confirmed_balance"]}. ` +
+        `Unconfirmed: ${incomingBalance["unconfirmed_balance"]}. ` +
+        `New total (incoming + outcoming) confirmed: ${totalConfirmed}.`,
+        );
       });
     });
 
