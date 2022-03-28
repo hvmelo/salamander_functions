@@ -12,6 +12,4 @@ export {onIncomingTxStatusUpdate} from
 export {onOutgoingTxStatusUpdate} from
   "./functions/triggers/on_outgoing_tx_status_update.js";
 
-export {onAddressBalanceUpdate} from
-  "./functions/triggers/on_address_balance_update.js";
 

@@ -47,13 +47,14 @@ export const syncTransactions = functions.
             getTransactions({start_height: blockHeight});
 
         /* Filter transactions list so that it contains only
-         the ones with addresses related to wallets */
+       the ones with addresses related to wallets */
         const relevantTxs = result.transactions?.reverse().
             reduce((relevantList, tx) => {
               if (tx.amount > 0) {
-                const address = tx.dest_addresses.
-                    find((element) => addresses.includes(element));
+                const address = tx.dest_addresses.find(
+                    (element) => addresses[element]);
                 if (address) {
+                  tx.walletId = addresses[address];
                   tx.address = address;
                   relevantList.push(tx);
                 }
@@ -106,7 +107,7 @@ export const syncTransactions = functions.
 
           const newBlockHeight = earliestBlockWithUnconfirmedTx ??
           (latestBlockWithConfirmedTx ?
-          latestBlockWithConfirmedTx + 1 : blockHeight);
+            latestBlockWithConfirmedTx + 1 : blockHeight);
 
           const lndSyncDoc = {
             "block_height": newBlockHeight,
@@ -129,7 +130,6 @@ export const syncTransactions = functions.
             "Error when trying to activate lightning");
       }
     });
-
 
 /**
  * Runs a full syncing batch. It does the following tasks:
@@ -193,6 +193,8 @@ async function runBatch(transactions, start, end) {
  *                the earliest block where unconfirmed transactions were found.
  */
 async function processIncomingTransaction(batch, transaction) {
+  const walletId = transaction.walletId;
+
   const tx = {
     "address": transaction.address,
     "tx_hash": transaction.tx_hash,
@@ -203,12 +205,13 @@ async function processIncomingTransaction(batch, transaction) {
   };
 
   // The transaction doc id will be the transaction hash, as it is unique.
-  // We write it as an element of a subcollection inside the address document
-  const incomingTxColRef = addressesCollection.doc(transaction.address).
+  // We write it as an element of the incoming subcollection inside
+  // the wallet document
+
+  const incomingTxColRef = walletsCollection.doc(walletId).
       collection("incoming_txs");
-
-
   const txRef = incomingTxColRef.doc(transaction.tx_hash);
+
 
   // Writes the transaction to the firebase database.
   // Will update fields if is exists.
@@ -221,8 +224,8 @@ async function processIncomingTransaction(batch, transaction) {
   }
 
   console.log(`INCOMING transaction to address ${transaction.address} ` +
-              `is now CONFIRMED. Tx hash: ${transaction.tx_hash}. ` +
-              `(${transaction.num_confirmations} confirmations).`);
+    `is now CONFIRMED. Tx hash: ${transaction.tx_hash}. ` +
+    `(${transaction.num_confirmations} confirmations).`);
 
   return "CONFIRMED";
 }
@@ -265,19 +268,20 @@ async function processOutgoingTransaction(batch, transaction) {
   tx["fee"] = transaction.total_fees;
   if (transaction.num_confirmations < 6) {
     tx["status"] = "UNCONFIRMED";
-    let retStatus = "UNCONFIRMED";
     if (transaction.block_height > 0) {
       tx["block_height"] = transaction.block_height;
     } else {
-      retStatus = "MEMPOOL";
+      tx["status"] = "MEMPOOL";
     }
     // Writes the transaction to the firebase database.
     // Will update fields if is exists.
     batch.set(txRef, tx);
-    console.log(`Found ${retStatus} outgoing tx from wallet '${walletId}'. ` +
-                `Payment id: ${paymentId}. Tx hash: ${transaction.tx_hash}`);
+    console.log(`Found ${tx.status} outgoing tx from wallet '${walletId}'. ` +
+      `Payment id: ${paymentId}. Tx hash: ${transaction.tx_hash}. ` +
+      `Num confirmations: ${tx.status == "MEMPOOL" ? 0 :
+        transaction.num_confirmations}.`);
 
-    return retStatus;
+    return tx.status;
   }
 
   tx["status"] = "CONFIRMED";
@@ -287,9 +291,9 @@ async function processOutgoingTransaction(batch, transaction) {
   // Will update fields if is exists.
   batch.set(txRef, tx);
   console.log(`OUTGOING transaction from wallet '${walletId}' is now ` +
-              `CONFIRMED. Payment id: ${paymentId}. ` +
-              `${transaction.num_confirmations} confirmations. ` +
-              `Tx hash: ${transaction.tx_hash}.`);
+    `CONFIRMED. Payment id: ${paymentId}. ` +
+    `${transaction.num_confirmations} confirmations. ` +
+    `Tx hash: ${transaction.tx_hash}.`);
 
   return "CONFIRMED";
 }
@@ -300,7 +304,10 @@ async function processOutgoingTransaction(batch, transaction) {
  */
 async function getAddresses() {
   const addressesSnap = await addressesCollection.get();
-  const addressList = addressesSnap.docs.map((doc) => doc.id);
+  const addressList = addressesSnap.docs.reduce((accum, doc) => {
+    accum[doc.id] = doc.data()["wallet_id"];
+    return accum;
+  }, {});
   return addressList;
 }
 
