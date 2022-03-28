@@ -12,7 +12,7 @@ export const onAddressBalanceUpdate = functions.firestore
       const walletId = change.after.data()["wallet_id"];
 
       console.log("Detected an address balance update for wallet " +
-        `'${walletId}'. Updating wallet balances...`);
+      `'${walletId}'. Updating wallet balances...`);
 
       await db.runTransaction(async (t) => {
         const walletRef = walletsCollection.doc(walletId);
@@ -38,13 +38,15 @@ export const onAddressBalanceUpdate = functions.firestore
         }, {"confirmed_balance": 0, "unconfirmed_balance": 0});
 
         const walletData = walletSnap.data();
-        const totalConfirmed = (walletData.balance?.outgoing?.confirmed ?? 0) +
-        incomingBalance["confirmed_balance"];
+        const totalAvailable =
+        incomingBalance["confirmed_balance"] -
+        (walletData.balance?.outgoing?.confirmed ?? 0) -
+        (walletData.balance?.outgoing?.unconfirmed ?? 0);
 
         t.set(walletRef,
             {
               balance: {
-                total_confirmed: totalConfirmed,
+                total_available: totalAvailable,
                 incoming: {
                   confirmed: incomingBalance["confirmed_balance"],
                   unconfirmed: incomingBalance["unconfirmed_balance"],
@@ -56,7 +58,8 @@ export const onAddressBalanceUpdate = functions.firestore
         console.log(`Updated incoming balance for wallet '${walletId}'. ` +
         `Confirmed: ${incomingBalance["confirmed_balance"]}. ` +
         `Unconfirmed: ${incomingBalance["unconfirmed_balance"]}. ` +
-        `New total (incoming + outcoming) confirmed: ${totalConfirmed}.`,
+        "Total available for payments (incoming - outgoing " +
+        `(conf + unconf)): ${totalAvailable}.`,
         );
       });
     });

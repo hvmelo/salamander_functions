@@ -250,9 +250,9 @@ async function processOutgoingTransaction(batch, transaction) {
   if (txSnap.exists) {
     tx = txSnap.data();
   } else {
-    console.log(`No payment found with id: ${paymentId} in wallet ` +
-      `${walletId}. Creating a new one. ` +
-      `Tx hash: ${transaction.tx_hash}.`);
+    console.log(`No payment found with id '${paymentId}' from wallet ` +
+      `${walletId}. Creating a new one (will save destination address ` +
+      `as UNKNOWN. Tx hash: ${transaction.tx_hash}.`);
     tx = {
       "to_address": "UNKNOWN",
       "created": "UNKNOWN",
@@ -274,7 +274,8 @@ async function processOutgoingTransaction(batch, transaction) {
     // Writes the transaction to the firebase database.
     // Will update fields if is exists.
     batch.set(txRef, tx);
-    console.log(`Saved ${retStatus} outgoing tx id: ${paymentId}`);
+    console.log(`Found ${retStatus} outgoing tx from wallet '${walletId}'. ` +
+                `Payment id: ${paymentId}. Tx hash: ${transaction.tx_hash}`);
 
     return retStatus;
   }

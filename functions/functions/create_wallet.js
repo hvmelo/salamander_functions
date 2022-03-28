@@ -55,7 +55,7 @@ export const createWallet = functions.
       // Creates the wallet document
       const walletDoc = {
         balance: {
-          total_confirmed: 0,
+          total_available: 0,
           incoming: {
             confirmed: 0,
             unconfirmed: 0,

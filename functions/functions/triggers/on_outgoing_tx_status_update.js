@@ -38,13 +38,15 @@ export const onOutgoingTxStatusUpdate = functions.firestore
         }, {"confirmed_balance": 0, "unconfirmed_balance": 0});
 
         const walletData = walletSnap.data();
-        const totalConfirmed = (walletData.balance?.incoming?.confirmed ?? 0) +
-        outgoingBalance["confirmed_balance"];
+        const totalAvailable =
+        (walletData.balance?.incoming?.confirmed ?? 0) -
+        outgoingBalance["confirmed_balance"] -
+        outgoingBalance["unconfirmed_balance"];
 
         t.set(walletRef,
             {
               balance: {
-                total_confirmed: totalConfirmed,
+                total_available: totalAvailable,
                 outgoing: {
                   confirmed: outgoingBalance["confirmed_balance"],
                   unconfirmed: outgoingBalance["unconfirmed_balance"],
@@ -57,7 +59,8 @@ export const onOutgoingTxStatusUpdate = functions.firestore
         console.log(`Updated outgoing balance for wallet '${walletId}'. ` +
         `Confirmed: ${outgoingBalance["confirmed_balance"]}. ` +
         `Unconfirmed: ${outgoingBalance["unconfirmed_balance"]}. ` +
-        `New total (incoming + outgoing) confirmed: ${totalConfirmed}.`,
+        "Total available for payments (incoming - outgoing " +
+        `(conf + unconf)): ${totalAvailable}.`,
         );
       });
     });
