@@ -27,7 +27,8 @@ export const syncTransactions = functions.
         return;
       }
 
-      console.log(`The number of relevant addresses is ${addresses.length}`);
+      console.log("The number of relevant addresses is " +
+      `${Object.keys(addresses).length}`);
       console.log(`The number of wallets is ${wallets.length}`);
 
       // Connect to the lnd server and activate lightining (if needed)
@@ -47,7 +48,7 @@ export const syncTransactions = functions.
             getTransactions({start_height: blockHeight});
 
         /* Filter transactions list so that it contains only
-       the ones with addresses related to wallets */
+         the ones with addresses related to wallets */
         const relevantTxs = result.transactions?.reverse().
             reduce((relevantList, tx) => {
               if (tx.amount > 0) {
@@ -196,21 +197,23 @@ async function processIncomingTransaction(batch, transaction) {
   const walletId = transaction.walletId;
 
   const tx = {
+    "direction": "INCOMING",
     "address": transaction.address,
     "tx_hash": transaction.tx_hash,
     "block_height": transaction.block_height,
     "timestamp": Timestamp.fromMillis(transaction.time_stamp * 1000),
     "amount": transaction.amount,
     "status": transaction.num_confirmations < 6 ? "UNCONFIRMED" : "CONFIRMED",
+
   };
 
   // The transaction doc id will be the transaction hash, as it is unique.
   // We write it as an element of the incoming subcollection inside
   // the wallet document
 
-  const incomingTxColRef = walletsCollection.doc(walletId).
-      collection("incoming_txs");
-  const txRef = incomingTxColRef.doc(transaction.tx_hash);
+  const transactionsColRef = walletsCollection.doc(walletId).
+      collection("transactions");
+  const txRef = transactionsColRef.doc(transaction.tx_hash);
 
 
   // Writes the transaction to the firebase database.
@@ -241,29 +244,31 @@ async function processIncomingTransaction(batch, transaction) {
 async function processOutgoingTransaction(batch, transaction) {
   // Get the transaction in the database
   const labelSplit = transaction.label.split(":");
+  const txid = transaction.tx_hash;
   const walletId = labelSplit[1];
-  const paymentId = labelSplit[2];
+  const address = labelSplit[2];
 
-  const outgoingTxColRef = walletsCollection.doc(walletId).
-      collection("outgoing_txs");
-  const txRef = outgoingTxColRef.doc(paymentId);
+  const transactionsColRef = walletsCollection.doc(walletId).
+      collection("transactions");
+  const txRef = transactionsColRef.doc(txid);
   const txSnap = await txRef.get();
 
   let tx;
   if (txSnap.exists) {
     tx = txSnap.data();
   } else {
-    console.log(`No payment found with id '${paymentId}' from wallet ` +
-      `${walletId}. Creating a new one (will save destination address ` +
-      `as UNKNOWN. Tx hash: ${transaction.tx_hash}.`);
+    console.log(`No payment found in the database with id '${txid}' ` +
+      `from wallet ${walletId}. Creating a new one.`);
     tx = {
-      "to_address": "UNKNOWN",
-      "created": "UNKNOWN",
+      "address": address,
+      "created": FieldValue.serverTimestamp(),
       "amount": Math.abs(transaction.amount) - transaction.total_fees,
-      "txid": transaction.tx_hash,
+      "tx_hash": txid,
     };
   }
 
+
+  tx["direction"] = "OUTGOING";
   tx["timestamp"] = Timestamp.fromMillis(transaction.time_stamp * 1000);
   tx["fee"] = transaction.total_fees;
   if (transaction.num_confirmations < 6) {
@@ -276,10 +281,9 @@ async function processOutgoingTransaction(batch, transaction) {
     // Writes the transaction to the firebase database.
     // Will update fields if is exists.
     batch.set(txRef, tx);
-    console.log(`Found ${tx.status} outgoing tx from wallet '${walletId}'. ` +
-      `Payment id: ${paymentId}. Tx hash: ${transaction.tx_hash}. ` +
-      `Num confirmations: ${tx.status == "MEMPOOL" ? 0 :
-        transaction.num_confirmations}.`);
+    console.log(`Found ${tx.status} payment from wallet '${walletId}'. ` +
+      `Tx hash: ${transaction.tx_hash}. Confirmations: ` +
+      `${tx.status == "MEMPOOL" ? 0 : transaction.num_confirmations}.`);
 
     return tx.status;
   }
@@ -290,10 +294,8 @@ async function processOutgoingTransaction(batch, transaction) {
   // Writes the transaction to the firebase database.
   // Will update fields if is exists.
   batch.set(txRef, tx);
-  console.log(`OUTGOING transaction from wallet '${walletId}' is now ` +
-    `CONFIRMED. Payment id: ${paymentId}. ` +
-    `${transaction.num_confirmations} confirmations. ` +
-    `Tx hash: ${transaction.tx_hash}.`);
+  console.log(`CONFIRMED payment from wallet '${walletId}'. ` +
+    `Tx hash: ${txid}. Confirmations: ${transaction.num_confirmations}.`);
 
   return "CONFIRMED";
 }

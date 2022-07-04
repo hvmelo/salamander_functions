@@ -39,8 +39,8 @@ export const createWallet = functions.
         const result = await Lightning.newAddress({type: NESTED_PUBKEY_HASH});
         if (result != null) {
           address = result.address;
-          console.log(`Created a new address for user ${userId} ` +
-                    `with hash ${address}.`);
+          console.log(`Created a new address for user ${userId} with ` +
+          `hash ${address}.`);
         } else {
           throw new HttpsError("aborted",
               "Error when trying to to retrieve a new address.");
@@ -55,7 +55,7 @@ export const createWallet = functions.
       // Creates the wallet document
       const walletDoc = {
         balance: {
-          total_available: 0,
+          total_settled: 0,
           incoming: {
             confirmed: 0,
             unconfirmed: 0,
